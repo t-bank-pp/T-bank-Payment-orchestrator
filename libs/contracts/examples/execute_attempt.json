@@ -1,0 +1,15 @@
+{
+  "event_id": "7f3c2a1e-5b4d-4c8e-9a6f-1d2e3f4a5b6c",
+  "occurred_at": "2026-10-26T12:00:00Z",
+  "payment_id": "0b9e8d7c-6a5f-4e3d-8c2b-1a0f9e8d7c6b",
+  "attempt_id": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+  "correlation_id": "0b9e8d7c-6a5f-4e3d-8c2b-1a0f9e8d7c6b",
+  "type": "ExecuteAttempt",
+  "version": 1,
+  "data": {
+    "channel_id": "A",
+    "amount_minor": 150000,
+    "currency": "RUB",
+    "recipient": "recipient-001"
+  }
+}
