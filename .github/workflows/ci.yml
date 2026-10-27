@@ -34,9 +34,11 @@ jobs:
           cache-dependency-path: requirements-dev.lock
       - run: python -m pip install -r requirements-dev.lock
       - run: python -m pip install --no-deps -e .
+      - run: python -m pip install --no-deps -e libs/contracts
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
+      - run: mypy --config-file libs/contracts/pyproject.toml libs/contracts/contracts
       - run: alembic upgrade head
       - run: alembic check
       - run: pytest -q

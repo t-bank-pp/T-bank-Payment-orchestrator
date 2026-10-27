@@ -38,6 +38,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-dev.lock
 python -m pip install --no-deps -e .
+python -m pip install --no-deps -e libs/contracts
 cp .env.example .env
 docker compose up -d --wait postgres
 alembic upgrade head
@@ -92,10 +93,13 @@ alembic check
 
 ## Проверки
 
+Общие контракты находятся в `libs/contracts`. Пакет содержит команду `ExecuteAttempt`, JSON-кодек и пример сообщения в `libs/contracts/examples/execute_attempt.json`. Он устанавливается отдельно от `payment`; для локальных проверок выполните обе команды установки из раздела разработки.
+
 ```sh
 ruff check .
 ruff format --check .
 mypy
+mypy --config-file libs/contracts/pyproject.toml libs/contracts/contracts
 pytest -q -m "not integration"
 ```
 
@@ -105,6 +109,6 @@ pytest -q -m "not integration"
 TEST_DATABASE_URL=postgresql+asyncpg://payment:payment@127.0.0.1:55432/postgres pytest -q
 ```
 
-`TEST_DATABASE_URL` задаётся явно и указывает на локальный/тестовый PostgreSQL. Пользователю нужно право `CREATE DATABASE`: тесты создают базы `tbpo5_test_<uuid>` и удаляют только эти базы. Без этой переменной интеграционные тесты пропускаются. GitHub Actions задаёт её и выполняет все проверки на PostgreSQL 16.
+`TEST_DATABASE_URL` задаётся явно и указывает на локальный/тестовый PostgreSQL. Пользователю нужно право `CREATE DATABASE`: тесты создают базы `tbpo5_test_<uuid>` и удаляют только эти базы. Без этой переменной интеграционные тесты пропускаются. `pytest` из корня запускает тесты payment и контрактов; GitHub Actions устанавливает оба пакета, задаёт переменную и выполняет все проверки на PostgreSQL 16.
 
 Зависимости закреплены в двух lock-файлах. Для обновления после изменения `pyproject.toml` используйте `uv pip compile pyproject.toml -o requirements.lock` и `uv pip compile pyproject.toml --extra dev -o requirements-dev.lock` под Python 3.12.
