@@ -2,7 +2,7 @@
 
 Учебный оркестратор тестовых платежей. Деньги, получатели и каналы вымышлены.
 
-В рамках **TBPO-5** добавлена основа `payment-service`: FastAPI, настройки из окружения, асинхронное подключение к PostgreSQL 16, модели и первая миграция Alembic. Создание платежей, маршрутизация и Kafka-процессы добавляются отдельными задачами.
+В рамках **TBPO-5** добавлена основа `payment-service`: FastAPI, настройки из окружения, асинхронное подключение к PostgreSQL 16, модели и первая миграция Alembic. **TBPO-10** добавляет получение платежа и его попыток. Создание платежей, маршрутизация и Kafka-процессы добавляются отдельными задачами.
 
 ## Быстрый запуск в Docker
 
@@ -19,6 +19,34 @@ docker compose up -d --wait payment
 - OpenAPI: <http://localhost:8000/openapi.json>
 - Liveness: <http://localhost:8000/health/live> — процесс работает, без обращения к БД.
 - Readiness: <http://localhost:8000/health/ready> — выполняет `SELECT 1`, возвращает 503 при недоступной БД.
+
+## Получение платежа
+
+`GET /payments/{payment_id}` принимает UUID и возвращает текущие данные платежа:
+
+```json
+{
+  "payment_id": "b14024b9-9c83-4f44-b4ca-3084bcb8395a",
+  "amount_minor": 125000,
+  "currency": "RUB",
+  "recipient": "merchant-demo-001",
+  "status": "in_progress",
+  "attempts": [
+    {
+      "attempt_id": "8595990f-a31e-4874-9db5-0e20880a454c",
+      "number": 1,
+      "channel_id": "A",
+      "outcome": null
+    }
+  ]
+}
+```
+
+Попытки отсортированы по `number`. Если результата ещё нет, `outcome` присутствует со значением `null`; если попыток нет, возвращается `[]`. Поля идемпотентности, хеш запроса, версия и внутреннее объяснение выбора в этот ответ не включаются. Чтение платежа и попыток выполняется одним SQL-запросом.
+
+Несуществующий UUID возвращает `404` с телом `{"error":{"code":"PAYMENT_NOT_FOUND","message":"Платёж не найден"}}`. Некорректный формат UUID возвращает стандартную ошибку валидации FastAPI `422`. Схемы обоих ответов, `200` и `404`, доступны в `/docs`. Для проверки успешного чтения нужен платёж в БД; создание через POST реализуется в TBPO-11.
+
+## Управление локальным окружением
 
 Миграции запускаются явно, а не при старте каждого экземпляра API. Readiness проверяет соединение с БД; сама по себе она не подтверждает применение миграций.
 
@@ -51,11 +79,13 @@ uvicorn payment.main:create_app --factory --reload
 ```text
 services/payment/
   src/payment/
+    api/               # GET платежа и публичные схемы ответа
     config.py          # настройки Pydantic Settings
     main.py            # фабрика FastAPI и health endpoints
     db/
       base.py          # DeclarativeBase и имена ограничений
       models.py        # Payment, PaymentAttempt, OutboxMessage
+      queries.py       # чтение платежа и попыток одним запросом
       session.py       # async engine, sessions и get_session
   migrations/          # Alembic и начальная ревизия
   tests/               # API/config и интеграционные проверки PostgreSQL

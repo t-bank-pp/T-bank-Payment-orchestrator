@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from payment.api.payments import router as payments_router
 from payment.config import Settings, get_settings
 from payment.db.session import Database
 
@@ -24,6 +25,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await database.close()
 
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+    app.include_router(payments_router)
 
     @app.get("/health/live", tags=["Health"])
     async def live() -> dict[str, str]:
