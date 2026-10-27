@@ -1,12 +1,10 @@
-from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
-import httpx
 import pytest
 from payment.config import Settings
 from payment.db.models import Payment, PaymentAttempt
 from payment.db.session import Database
-from payment.main import create_app
+from payment_test_support import payment_values
 from pydantic import SecretStr
 from sqlalchemy import insert, select, update
 
@@ -14,34 +12,18 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def client(migrated_database: Database) -> AsyncIterator[httpx.AsyncClient]:
-    settings = Settings(
+def app_settings(migrated_database: Database) -> Settings:
+    return Settings(
         database_url=SecretStr(migrated_database.engine.url.render_as_string(hide_password=False)),
         _env_file=None,
     )
-    app = create_app(settings)
-    async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as api_client:
-            yield api_client
 
 
 async def seed_payment(database: Database, status: str = "in_progress") -> UUID:
-    payment_id = uuid4()
+    values = payment_values(amount_minor=2**33, status=status)
     async with database.engine.begin() as conn:
-        await conn.execute(
-            insert(Payment).values(
-                id=payment_id,
-                idempotency_key=uuid4().hex,
-                request_hash="a" * 64,
-                amount_minor=2**33,
-                currency="RUB",
-                recipient="merchant-demo-001",
-                status=status,
-            )
-        )
-    return payment_id
+        await conn.execute(insert(Payment).values(**values))
+    return values["id"]
 
 
 async def test_get_payment_returns_public_fields_and_sorted_attempts(client, migrated_database):

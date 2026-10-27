@@ -6,13 +6,29 @@ from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
+import httpx
 import pytest
 from payment.config import Settings
 from payment.db.session import Database
+from payment_test_support import api_client
 from pydantic import SecretStr
 from sqlalchemy.engine import make_url
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture
+def app_settings() -> Settings:
+    return Settings(
+        database_url=SecretStr("postgresql+asyncpg://demo:demo@127.0.0.1:1/unreachable"),
+        _env_file=None,
+    )
+
+
+@pytest.fixture
+async def client(app_settings: Settings) -> AsyncIterator[httpx.AsyncClient]:
+    async with api_client(app_settings) as client:
+        yield client
 
 
 def run_alembic(database_url: str, *arguments: str) -> subprocess.CompletedProcess[str]:

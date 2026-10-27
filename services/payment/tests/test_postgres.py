@@ -1,29 +1,16 @@
 from uuid import uuid4
 
-import httpx
 import pytest
 from conftest import run_alembic
 from payment.config import Settings
 from payment.db.models import OutboxMessage, Payment, PaymentAttempt
 from payment.db.session import Database
-from payment.main import create_app
+from payment_test_support import api_client, payment_values
 from pydantic import SecretStr
 from sqlalchemy import BigInteger, DateTime, insert, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
 pytestmark = pytest.mark.integration
-
-
-def payment_values(**overrides):
-    return {
-        "id": uuid4(),
-        "idempotency_key": uuid4().hex,
-        "request_hash": "0" * 64,
-        "amount_minor": 125000,
-        "currency": "RUB",
-        "recipient": "merchant-demo-001",
-        **overrides,
-    }
 
 
 async def test_migration_roundtrip_and_model_consistency(empty_database):
@@ -153,12 +140,8 @@ async def test_models_share_one_transaction_and_rollback_together(migrated_datab
 
 
 async def test_readiness_checks_real_postgres(empty_database):
-    app = create_app(Settings(database_url=SecretStr(empty_database), _env_file=None))
-    async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            response = await client.get("/health/ready")
-            assert response.status_code == 200
-            assert response.json() == {"status": "ok"}
+    settings = Settings(database_url=SecretStr(empty_database), _env_file=None)
+    async with api_client(settings) as client:
+        response = await client.get("/health/ready")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
