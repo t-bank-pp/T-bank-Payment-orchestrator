@@ -27,8 +27,31 @@ router = APIRouter(prefix="/payments", tags=["Payments"])
     response_model=CreatePaymentResponse,
     summary="Создать платёж или получить ID повторного запроса",
     responses={
-        409: {"model": ErrorResponse, "description": "IDEMPOTENCY_CONFLICT"},
-        500: {"model": ErrorResponse, "description": "INTERNAL_ERROR"},
+        409: {
+            "model": ErrorResponse,
+            "description": "IDEMPOTENCY_CONFLICT",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": {
+                            "code": "IDEMPOTENCY_CONFLICT",
+                            "message": "Ключ уже использован с другими данными",
+                        }
+                    }
+                }
+            },
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "INTERNAL_ERROR",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": {"code": "INTERNAL_ERROR", "message": "Внутренняя ошибка сервиса"}
+                    }
+                }
+            },
+        },
     },
 )
 async def post_payment(

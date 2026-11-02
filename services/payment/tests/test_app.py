@@ -27,6 +27,11 @@ async def test_docs_and_liveness_start_without_opening_a_database_connection(
     assert {"202", "409", "422", "500"} <= creation["responses"].keys()
     assert creation["parameters"][0]["name"] == "Idempotency-Key"
     assert creation["parameters"][0]["required"] is True
+    for status, code in (("409", "IDEMPOTENCY_CONFLICT"), ("500", "INTERNAL_ERROR")):
+        assert (
+            creation["responses"][status]["content"]["application/json"]["example"]["error"]["code"]
+            == code
+        )
 
 
 async def test_invalid_payment_uuid_is_rejected_before_querying_database(client: httpx.AsyncClient):
