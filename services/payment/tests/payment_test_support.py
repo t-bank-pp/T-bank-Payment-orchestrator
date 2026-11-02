@@ -9,11 +9,14 @@ from payment.main import create_app
 
 
 @asynccontextmanager
-async def api_client(settings: Settings) -> AsyncIterator[httpx.AsyncClient]:
+async def api_client(
+    settings: Settings, *, raise_app_exceptions: bool = True
+) -> AsyncIterator[httpx.AsyncClient]:
     app = create_app(settings)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=raise_app_exceptions),
+            base_url="http://test",
         ) as client:
             yield client
 

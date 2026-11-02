@@ -1,15 +1,57 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from payment.api.schemas import AttemptResponse, ErrorDetail, ErrorResponse, PaymentResponse
+from payment.api.schemas import (
+    AttemptResponse,
+    CreatePaymentRequest,
+    CreatePaymentResponse,
+    ErrorDetail,
+    ErrorResponse,
+    IdempotencyKey,
+    PaymentResponse,
+)
 from payment.db.queries import find_payment_with_attempts
 from payment.db.session import get_session
+from payment.use_cases.create_payment import IdempotencyConflict, create_payment
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
+
+
+@router.post(
+    "",
+    status_code=202,
+    response_model=CreatePaymentResponse,
+    summary="Создать платёж или получить ID повторного запроса",
+    responses={
+        409: {"model": ErrorResponse, "description": "IDEMPOTENCY_CONFLICT"},
+        500: {"model": ErrorResponse, "description": "INTERNAL_ERROR"},
+    },
+)
+async def post_payment(
+    body: CreatePaymentRequest,
+    idempotency_key: Annotated[IdempotencyKey, Header(alias="Idempotency-Key")],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CreatePaymentResponse | JSONResponse:
+    try:
+        payment_id = await create_payment(
+            session,
+            idempotency_key=idempotency_key,
+            amount_minor=body.amount_minor,
+            currency=body.currency,
+            recipient=body.recipient,
+        )
+    except IdempotencyConflict:
+        error = ErrorResponse(
+            error=ErrorDetail(
+                code="IDEMPOTENCY_CONFLICT", message="Ключ уже использован с другими данными"
+            )
+        )
+        return JSONResponse(status_code=409, content=error.model_dump())
+    return CreatePaymentResponse(payment_id=payment_id)
 
 
 @router.get(

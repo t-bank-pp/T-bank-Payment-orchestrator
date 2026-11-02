@@ -1,10 +1,27 @@
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 PaymentStatus = Literal["routing", "in_progress", "pending", "succeeded", "failed", "needs_review"]
 AttemptOutcome = Literal["succeeded", "failed", "unknown"]
+IdempotencyKey = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)
+]
+
+
+class CreatePaymentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    amount_minor: int = Field(strict=True, gt=0, le=9223372036854775807)
+    currency: Literal["RUB"]
+    recipient: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ]
+
+
+class CreatePaymentResponse(BaseModel):
+    payment_id: UUID
 
 
 class AttemptResponse(BaseModel):
@@ -26,7 +43,7 @@ class PaymentResponse(BaseModel):
 
 
 class ErrorDetail(BaseModel):
-    code: Literal["PAYMENT_NOT_FOUND"]
+    code: Literal["PAYMENT_NOT_FOUND", "IDEMPOTENCY_CONFLICT", "INTERNAL_ERROR"]
     message: str
 
 
