@@ -14,6 +14,7 @@ dependencies = [
   "asyncpg>=0.30,<1",
   "alembic>=1.14,<2",
   "pydantic-settings>=2.7,<3",
+  "aiokafka>=0.12,<1",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +32,10 @@ where = ["services/payment/src"]
 [tool.pytest.ini_options]
 testpaths = ["services/payment/tests", "libs/contracts/tests"]
 asyncio_mode = "auto"
-markers = ["integration: requires TEST_DATABASE_URL and PostgreSQL 16"]
+markers = [
+  "integration: requires TEST_DATABASE_URL and PostgreSQL 16",
+  "kafka: requires TEST_KAFKA_BOOTSTRAP_SERVERS and a real Kafka broker",
+]
 
 [tool.ruff]
 target-version = "py312"
@@ -49,5 +53,5 @@ files = ["services/payment/src"]
 mypy_path = ["libs/contracts"]
 
 [[tool.mypy.overrides]]
-module = ["asyncpg.*"]
+module = ["asyncpg.*", "aiokafka.*"]
 ignore_missing_imports = true
