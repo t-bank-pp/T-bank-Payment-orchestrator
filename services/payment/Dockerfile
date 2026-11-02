@@ -6,6 +6,8 @@ WORKDIR /app
 
 COPY requirements.lock pyproject.toml ./
 RUN pip install --no-cache-dir -r requirements.lock
+COPY libs/contracts ./libs/contracts
+RUN pip install --no-cache-dir --no-deps ./libs/contracts
 COPY services/payment/src ./services/payment/src
 RUN pip install --no-cache-dir --no-deps .
 COPY alembic.ini ./

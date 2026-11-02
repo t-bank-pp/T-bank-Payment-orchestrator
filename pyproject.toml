@@ -45,6 +45,8 @@ python_version = "3.12"
 plugins = ["pydantic.mypy"]
 strict = true
 files = ["services/payment/src"]
+# Editable installs use an import hook that mypy cannot follow.
+mypy_path = ["libs/contracts"]
 
 [[tool.mypy.overrides]]
 module = ["asyncpg.*"]
