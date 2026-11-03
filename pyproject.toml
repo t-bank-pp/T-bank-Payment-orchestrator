@@ -30,7 +30,7 @@ dev = [
 where = ["services/payment/src"]
 
 [tool.pytest.ini_options]
-testpaths = ["services/payment/tests", "libs/contracts/tests"]
+testpaths = ["services/payment/tests", "services/executor/tests", "libs/contracts/tests"]
 asyncio_mode = "auto"
 markers = [
   "integration: requires TEST_DATABASE_URL and PostgreSQL 16",
@@ -48,7 +48,7 @@ select = ["E", "F", "I", "UP"]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
 strict = true
-files = ["services/payment/src"]
+files = ["services/payment/src", "services/executor/src"]
 # Editable installs use an import hook that mypy cannot follow.
 mypy_path = ["libs/contracts"]
 
