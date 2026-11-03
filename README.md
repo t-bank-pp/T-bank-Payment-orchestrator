@@ -2,23 +2,64 @@
 
 Учебный оркестратор тестовых платежей. Деньги, получатели и каналы вымышлены.
 
-В рамках **TBPO-5** добавлена основа `payment-service`: FastAPI, настройки из окружения, асинхронное подключение к PostgreSQL 16, модели и первая миграция Alembic. **TBPO-10** добавляет получение платежа и его попыток; **TBPO-11** — создание платежа с идемпотентностью и атомарной записью первой попытки через канал A и команды outbox. Публикация в Kafka и динамическая маршрутизация добавляются отдельными задачами.
+В рамках **TBPO-5** добавлена основа `payment-service`: FastAPI, настройки из окружения, асинхронное подключение к PostgreSQL 16, модели и первая миграция Alembic. **TBPO-10** добавляет получение платежа и его попыток; **TBPO-11** — создание платежа с идемпотентностью и атомарной записью первой попытки через канал A и команды outbox. **TBPO-14** добавляет Kafka и отдельный outbox publisher. Executor, обработка результатов и динамическая маршрутизация добавляются следующими задачами.
 
 ## Быстрый запуск в Docker
 
 Нужен запущенный Docker с Compose v2. Команды выполняются из корня репозитория.
 
 ```sh
-docker compose up -d --wait postgres
-docker compose build payment
+docker compose up -d --wait postgres kafka
+docker compose build payment payment-worker
 docker compose run --rm payment alembic upgrade head
-docker compose up -d --wait payment
+docker compose up -d --wait payment payment-worker
 ```
 
 - Swagger: <http://localhost:8000/docs>
 - OpenAPI: <http://localhost:8000/openapi.json>
 - Liveness: <http://localhost:8000/health/live> — процесс работает, без обращения к БД.
 - Readiness: <http://localhost:8000/health/ready> — выполняет `SELECT 1`, возвращает 503 при недоступной БД.
+- Kafka с хоста: `127.0.0.1:19092`; из контейнеров: `kafka:9092`.
+
+`kafka-storage-init` подготавливает права выделенного тома, сам брокер работает от пользователя appuser (1000). `kafka-init` создаёт `attempt.commands` с тремя партициями и одной репликой перед запуском worker. Это локальная конфигурация с одним брокером и PLAINTEXT; порты опубликованы только на loopback.
+
+API можно запустить без Kafka командой `docker compose up -d --wait payment`: он продолжит сохранять команды в PostgreSQL. Publisher — отдельный процесс, а не фоновая задача внутри API.
+
+## Публикация outbox в Kafka
+
+`payment-worker` запускает `python -m payment.worker`. Один проход блокирует одну неопубликованную строку через `FOR UPDATE SKIP LOCKED`, отправляет сохранённые `topic`, `payload` и UTF-8 ключ `message_key`, ждёт подтверждение Kafka, затем записывает `published_at` и делает commit. `ExecuteAttempt.new()` при отправке не вызывается: ID и содержимое конверта сохраняются при повторе.
+
+Worker использует producer с `acks=all` и `enable_idempotence=True`. Доставка из БД в Kafka остаётся **at-least-once**: Kafka и PostgreSQL не объединены общей транзакцией. Сбой после подтверждения Kafka до commit БД может дать вторую копию с тем же `event_id` и `attempt_id`; будущий executor должен дедуплицировать попытки. Идемпотентный producer не устраняет повторную отправку той же строки приложением или из другой сессии producer.
+
+При ошибке/таймауте отправки транзакция откатывается. После закрытия producer worker делает паузу и подключается заново. Если закрытие producer зависло, процесс завершается с ошибкой; Compose перезапускает его через `restart: unless-stopped`. Это не позволяет бесконечно создавать новые producer, оставляя старые в памяти. При SIGINT/SIGTERM ожидание пустой очереди прерывается; текущая отправка и закрытие ограничены таймаутами.
+
+Настройки через окружение (значения по умолчанию):
+
+| Переменная | Значение | Назначение |
+|---|---|---|
+| `PAYMENT_KAFKA_BOOTSTRAP_SERVERS` | `127.0.0.1:19092` | Адрес брокера; в Compose `kafka:9092` |
+| `PAYMENT_PUBLISHER_SEND_TIMEOUT` | `5` | Предел подключения/отправки в секундах |
+| `PAYMENT_PUBLISHER_POLL_INTERVAL` | `0.5` | Пауза при пустой очереди |
+| `PAYMENT_PUBLISHER_RETRY_INTERVAL` | `1` | Пауза после неудачного цикла |
+| `PAYMENT_PUBLISHER_SHUTDOWN_TIMEOUT` | `5` | Предел закрытия producer |
+
+Для нескольких worker: `docker compose up -d --scale payment-worker=2 payment-worker`. Заблокированные строки пропускаются другими процессами. Строгий порядок нескольких команд одного платежа между разными worker этим механизмом не гарантируется; на текущем этапе создаётся одна команда на платёж. Логи содержат ID сообщения и результат commit, без payload и строки подключения.
+
+Посмотреть команды можно Kafka CLI:
+
+```sh
+docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server kafka:9092 --topic attempt.commands --from-beginning \
+  --property print.key=true --max-messages 1
+```
+
+Локальный запуск worker после установки зависимостей и создания топика:
+
+```sh
+python -m payment.worker
+```
+
+Подробности клиента и локального образа: [aiokafka producer](https://aiokafka.readthedocs.io/en/stable/producer.html), [Apache Kafka Docker](https://kafka.apache.org/41/getting-started/docker/).
 
 ## Создание платежа
 
@@ -29,7 +70,7 @@ curl -i http://127.0.0.1:8000/payments \
   -d '{"amount_minor":125000,"currency":"RUB","recipient":"merchant-demo-001"}'
 ```
 
-`POST /payments` возвращает `202` и `{"payment_id":"UUID"}` только после commit платежа, первой попытки и полной команды `ExecuteAttempt` в outbox. На первом этапе платёж получает `in_progress`, попытка — `number=1`, `channel_id=A`, `outcome=null`. Отправка команды в Kafka в этот сценарий ещё не входит.
+`POST /payments` возвращает `202` и `{"payment_id":"UUID"}` только после commit платежа, первой попытки и полной команды `ExecuteAttempt` в outbox. На первом этапе платёж получает `in_progress`, попытка — `number=1`, `channel_id=A`, `outcome=null`. Worker отправляет команду в Kafka отдельно; ответ POST не ждёт брокер и не подтверждает исполнение платежа.
 
 - `amount_minor`: строго целое JSON-число от 1 до 9223372036854775807. Float (в том числе `1.0` и `1e0`), строки и boolean отклоняются.
 - `currency`: только `RUB`, без изменения регистра или обрезки пробелов.
@@ -107,6 +148,8 @@ services/payment/
     use_cases/         # создание платежа и первой попытки в общей транзакции
     config.py          # настройки Pydantic Settings
     main.py            # фабрика FastAPI и health endpoints
+    publisher.py       # одна подтверждённая отправка из outbox
+    worker.py          # отдельный процесс publisher, повторы и сигналы
     db/
       base.py          # DeclarativeBase и имена ограничений
       models.py        # Payment, PaymentAttempt, OutboxMessage
@@ -163,6 +206,15 @@ pytest -q -m "not integration"
 ```sh
 TEST_DATABASE_URL=postgresql+asyncpg://payment:payment@127.0.0.1:55432/postgres pytest -q
 ```
+
+Полный набор с настоящей Kafka (топик должен быть создан; production worker на время тестов остановлен):
+
+```sh
+TEST_DATABASE_URL=postgresql+asyncpg://payment:payment@127.0.0.1:55432/postgres \
+TEST_KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:19092 pytest -q
+```
+
+Kafka-тесты читают только сообщения своего уникального payment_id и не удаляют топик. Они проверяют обычную доставку и реальную повторную отправку после Kafka ack без commit БД. Без `TEST_KAFKA_BOOTSTRAP_SERVERS` эти два теста пропускаются; тесты publisher с PostgreSQL и подставным отправителем продолжают проверять таймаут, отмену, откат и параллельные worker. В CI Kafka запускается автоматически и пропусков этих проверок нет.
 
 `TEST_DATABASE_URL` задаётся явно и указывает на локальный/тестовый PostgreSQL. Пользователю нужно право `CREATE DATABASE`: тесты создают базы `tbpo5_test_<uuid>` и удаляют только эти базы. Без этой переменной интеграционные тесты пропускаются. `pytest` из корня запускает тесты payment и контрактов; GitHub Actions устанавливает оба пакета, задаёт переменную и выполняет все проверки на PostgreSQL 16.
 

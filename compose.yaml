@@ -15,6 +15,57 @@ services:
       timeout: 3s
       retries: 20
 
+  kafka-storage-init:
+    image: apache/kafka:4.1.2
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["chown -R 1000:1000 /var/lib/kafka/data"]
+    volumes:
+      - payment_kafka:/var/lib/kafka/data
+    restart: "no"
+
+  kafka:
+    image: apache/kafka:4.1.2
+    ports:
+      - "127.0.0.1:19092:19092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: CONTROLLER://:9093,INTERNAL://:9092,EXTERNAL://:19092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://127.0.0.1:19092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - payment_kafka:/var/lib/kafka/data
+    depends_on:
+      kafka-storage-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    stop_grace_period: 20s
+
+  kafka-init:
+    image: apache/kafka:4.1.2
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic attempt.commands --partitions 3 --replication-factor 1
+    restart: "no"
+
   payment:
     build:
       context: .
@@ -36,5 +87,23 @@ services:
       timeout: 6s
       retries: 3
 
+  payment-worker:
+    build:
+      context: .
+      dockerfile: services/payment/Dockerfile
+    command: ["python", "-m", "payment.worker"]
+    environment:
+      PAYMENT_DATABASE_URL: postgresql+asyncpg://payment:payment@postgres:5432/payment_db
+      PAYMENT_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 20s
+
 volumes:
   payment_postgres:
+  payment_kafka:
