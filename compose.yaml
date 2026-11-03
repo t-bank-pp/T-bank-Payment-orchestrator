@@ -1,4 +1,41 @@
 services:
+  demo-channel:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    command: ["uvicorn", "executor.demo_channel:create_app", "--factory", "--host", "0.0.0.0", "--port", "18080"]
+    environment:
+      DEMO_CHANNEL_DATABASE: /state/channel.sqlite3
+    volumes:
+      - demo_channel:/state
+    ports:
+      - "127.0.0.1:18080:18080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/health/ready', timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 5
+    stop_grace_period: 40s
+
+  executor-worker:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    command: ["python", "-m", "executor.execution"]
+    environment:
+      EXECUTOR_DATABASE_URL: postgresql+asyncpg://executor:executor@executor-postgres:5432/executor_db
+      EXECUTOR_CHANNEL_A_BASE_URL: http://demo-channel:18080
+    depends_on:
+      executor-postgres:
+        condition: service_healthy
+      demo-channel:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
   executor-postgres:
     image: postgres:16-alpine
     environment:
@@ -160,6 +197,7 @@ services:
     stop_grace_period: 20s
 
 volumes:
+  demo_channel:
   executor_postgres:
   payment_postgres:
   payment_kafka:
