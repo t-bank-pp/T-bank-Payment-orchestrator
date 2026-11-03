@@ -13,7 +13,17 @@ class Base(DeclarativeBase):
 
 class ExecutorAttempt(Base):
     __tablename__ = "executor_attempts"
-    __table_args__ = (CheckConstraint("state = 'queued'", name="ck_executor_attempts_state"),)
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('queued','in_progress','succeeded','failed','unknown')",
+            name="ck_executor_attempts_state",
+        ),
+        CheckConstraint(
+            "(state = 'in_progress' AND lease_token IS NOT NULL AND lease_expires_at IS NOT NULL) "
+            "OR (state <> 'in_progress' AND lease_token IS NULL AND lease_expires_at IS NULL)",
+            name="ck_executor_attempts_lease",
+        ),
+    )
 
     attempt_id: Mapped[UUID] = mapped_column(primary_key=True)
     # Payment belongs to another service: deliberately no cross-database foreign key.
@@ -22,6 +32,12 @@ class ExecutorAttempt(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     state: Mapped[str] = mapped_column(String(32), server_default="queued")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    lease_token: Mapped[UUID | None] = mapped_column()
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reason_code: Mapped[str | None] = mapped_column(String(100))
+    provider_operation_id: Mapped[str | None] = mapped_column(String(255))
+    result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class InboxEvent(Base):
