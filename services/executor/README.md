@@ -1,4 +1,4 @@
-# Executor — основа сервиса (TBPO-15)
+# Executor — основа сервиса и Kafka consumer (TBPO-15/16)
 
 Отдельный пакет `tbank-executor`, FastAPI и собственная PostgreSQL 16.
 Сервис не импортирует payment и не подключается к payment_db. Общий контракт
@@ -65,10 +65,71 @@ async with database.sessions() as session, session.begin():
 Исходный payload попытки не перезаписывается повторами, состояние не сбрасывается.
 Даты сохраняются как timestamptz. Числа сериализуются без преобразования во float.
 
-Этап не подключает Kafka consumer, обработку очереди queued, адаптеры каналов,
-вебхуки, списание и события результата. Защита от повторов регистрации сама по
+Обработчик queued, адаптеры каналов, вебхуки, списание и события результата
+добавляются отдельно. Защита от повторов регистрации сама по
 себе не гарантирует однократный внешний вызов — его идемпотентность будет
 реализована вместе с исполнением. Публичного HTTP endpoint для запуска попытки нет.
+
+## Приём команд из Kafka (TBPO-16)
+
+После миграции executor и запуска Kafka с явным созданием топика:
+
+```sh
+docker compose up -d --wait executor-postgres kafka
+docker compose build executor executor-consumer
+docker compose run --rm executor alembic -c executor-alembic.ini upgrade head
+docker compose up -d executor-consumer
+```
+
+Локально: `python -m executor.consumer`. Это отдельный процесс от HTTP API.
+Он подписан на `attempt.commands`; group `executor-attempts-v1`, auto commit
+выключен, isolation_level=read_committed. Новая группа начинает с earliest;
+существующая продолжает со своего подтверждённого offset. Для нескольких процессов:
+`docker compose up -d --scale executor-consumer=2 executor-consumer`.
+
+Записи обрабатываются последовательно в каждом процессе. После проверки
+контракта и точного UTF-8 ключа payment_id выполняется транзакция регистрации.
+Только после её commit consumer подтверждает `{topic-partition: offset + 1}`
+для конкретной записи. Позиции других прочитанных/предзагруженных записей не
+подтверждаются. Ошибка/таймаут БД не подтверждает offset; при сбое Kafka commit
+регистрация уже может сохраниться. Повтор использует inbox и attempt_id.
+
+При rebalance commit может отказать. Процесс закрывает consumer и подключается
+заново со стабильной group, читая подтверждённые позиции; подтверждённые в БД
+повторы не создают вторую попытку. Тот же путь используется при временных ошибках.
+Это at-least-once приём в queued; исполнение канала пока не запускается.
+История, удалённая retention Kafka, этим механизмом не восстанавливается.
+
+Невалидный JSON/контракт (включая tombstone), неверный/отсутствующий ключ или
+конфликт ID сохраняются в `executor_rejections`. Постоянные ошибки представления JSONB (например NUL в строке или переполнение числа) также сохраняются как INVALID_COMMAND; ошибки подключения и транзакции повторяются. Поля: topic, partition,
+kafka_offset (составной PK), reason, raw_key/raw_value (bytea, nullable), received_at
+(timestamptz). Причины: INVALID_COMMAND, KEY_MISMATCH, COMMAND_CONFLICT. Неудачная
+регистрация сначала полностью откатывается, затем отдельная транзакция сохраняет
+отклонённую запись. Её commit также предшествует подтверждению offset.
+
+Повтор позиции с теми же байтами не меняет сохранённое отклонение. Другие байты
+в существующей позиции вызывают SourceRecordConflict без подтверждения — например,
+после удаления и создания топика заново. Для новой истории нужен отдельный топик/
+контур БД; старые записи нельзя автоматически считать принятыми. Rejections —
+локальный журнал для разбора, без автоматического повторного исполнения и без
+Kafka DLQ. Тело сообщения и данные подключения не выводятся в логи consumer.
+
+| Настройка | По умолчанию | Назначение |
+|---|---|---|
+| EXECUTOR_KAFKA_BOOTSTRAP_SERVERS | 127.0.0.1:19092 | В Compose kafka:9092 |
+| EXECUTOR_CONSUMER_GROUP | executor-attempts-v1 | Стабильная группа |
+| EXECUTOR_CONSUMER_REQUEST_TIMEOUT | 5 | Предел start/commit, секунды |
+| EXECUTOR_CONSUMER_PROCESSING_TIMEOUT | 10 | Предел обработки и commit БД |
+| EXECUTOR_CONSUMER_POLL_INTERVAL | 1 | Максимальное ожидание getone перед проверкой сигнала |
+| EXECUTOR_CONSUMER_RETRY_INTERVAL | 1 | Пауза перед переподключением |
+| EXECUTOR_CONSUMER_SHUTDOWN_TIMEOUT | 5 | Предел закрытия клиента |
+
+SIGINT/SIGTERM прекращает получение новых записей; текущая обработка и закрытие
+ограничены таймаутами. Зависшее закрытие завершает процесс с ошибкой, Compose
+перезапускает его. При увеличении таймаутов увеличьте stop_grace_period относительно
+суммы processing + request + shutdown (по умолчанию 30 секунд).
+
+Семантика offset и ручного подтверждения: [документация aiokafka](https://aiokafka.readthedocs.io/en/stable/consumer.html).
 
 ## Проверки
 
@@ -80,6 +141,10 @@ TEST_EXECUTOR_DATABASE_URL=postgresql+asyncpg://executor:executor@127.0.0.1:5543
 Тесты создают и удаляют только собственные базы `tbpo15_test_<uuid>`. Нужна
 роль с правом CREATE DATABASE. Без переменной интеграционные тесты пропускаются.
 Проверяются дубли, конфликтующие ID, параллельные доставки, откат, миграции,
-ограничения и readiness. Для полного pytest задаются также TEST_DATABASE_URL
+ограничения и readiness. Kafka-проверки при TEST_KAFKA_BOOTSTRAP_SERVERS проверяют
+POST → outbox → Kafka → executor, перезапуск после потери commit offset и
+некорректную запись перед корректной в одной партиции. Используются отдельные
+группы; топик не удаляется. Обычные worker/consumer на время тестов остановлены.
+Для полного pytest задаются также TEST_DATABASE_URL
 и TEST_KAFKA_BOOTSTRAP_SERVERS из корневого README. CI использует отдельный
 PostgreSQL executor и выполняет миграции, alembic check и все тесты.

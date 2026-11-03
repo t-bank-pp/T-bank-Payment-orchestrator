@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, func
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, LargeBinary, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -33,6 +33,27 @@ class InboxEvent(Base):
     )
     payload_hash: Mapped[str] = mapped_column(String(64))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RejectedCommand(Base):
+    __tablename__ = "executor_rejections"
+    __table_args__ = (
+        CheckConstraint("partition >= 0 AND kafka_offset >= 0", name="ck_rejection_position"),
+        CheckConstraint(
+            "reason IN ('INVALID_COMMAND', 'KEY_MISMATCH', 'COMMAND_CONFLICT')",
+            name="ck_rejection_reason",
+        ),
+    )
+
+    topic: Mapped[str] = mapped_column(String(255), primary_key=True)
+    partition: Mapped[int] = mapped_column(primary_key=True)
+    kafka_offset: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    reason: Mapped[str] = mapped_column(String(32))
+    raw_key: Mapped[bytes | None] = mapped_column(LargeBinary)
+    raw_value: Mapped[bytes | None] = mapped_column(LargeBinary)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

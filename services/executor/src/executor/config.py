@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     database_url: SecretStr
     app_name: str = "Executor service"
     database_connect_timeout: float = Field(default=3, gt=0, le=30)
+    kafka_bootstrap_servers: str = Field(default="127.0.0.1:19092", min_length=1)
+    consumer_group: str = Field(default="executor-attempts-v1", min_length=1)
+    consumer_request_timeout: float = Field(default=5, ge=1, le=60)
+    consumer_processing_timeout: float = Field(default=10, gt=0, le=60)
+    consumer_poll_interval: float = Field(default=1, gt=0, le=5)
+    consumer_retry_interval: float = Field(default=1, gt=0, le=60)
+    consumer_shutdown_timeout: float = Field(default=5, gt=0, le=60)
 
     @field_validator("database_url")
     @classmethod

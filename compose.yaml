@@ -36,6 +36,24 @@ services:
       timeout: 6s
       retries: 5
 
+  executor-consumer:
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    command: ["python", "-m", "executor.consumer"]
+    environment:
+      EXECUTOR_DATABASE_URL: postgresql+asyncpg://executor:executor@executor-postgres:5432/executor_db
+      EXECUTOR_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      EXECUTOR_CONSUMER_GROUP: executor-attempts-v1
+    depends_on:
+      executor-postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
   postgres:
     image: postgres:16-alpine
     environment:
