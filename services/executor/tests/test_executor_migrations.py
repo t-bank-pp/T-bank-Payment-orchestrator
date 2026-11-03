@@ -11,7 +11,12 @@ async def test_migration_round_trip_and_metadata_match(executor_database, execut
     executor_migrate(url, "check")
     async with db.engine.connect() as conn:
         names = await conn.run_sync(lambda c: inspect(c).get_table_names())
-        assert set(names) == {"alembic_version", "executor_attempts", "inbox"}
+        assert set(names) == {
+            "alembic_version",
+            "executor_attempts",
+            "inbox",
+            "executor_rejections",
+        }
     await db.engine.dispose()
     executor_migrate(url, "downgrade", "base")
     async with db.engine.connect() as conn:
