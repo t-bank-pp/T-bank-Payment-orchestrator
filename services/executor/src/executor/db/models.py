@@ -1,0 +1,38 @@
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, func
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class ExecutorAttempt(Base):
+    __tablename__ = "executor_attempts"
+    __table_args__ = (CheckConstraint("state = 'queued'", name="ck_executor_attempts_state"),)
+
+    attempt_id: Mapped[UUID] = mapped_column(primary_key=True)
+    # Payment belongs to another service: deliberately no cross-database foreign key.
+    payment_id: Mapped[UUID] = mapped_column(index=True)
+    command_hash: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    state: Mapped[str] = mapped_column(String(32), server_default="queued")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class InboxEvent(Base):
+    __tablename__ = "inbox"
+
+    event_id: Mapped[UUID] = mapped_column(primary_key=True)
+    attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey("executor_attempts.attempt_id", ondelete="RESTRICT"), index=True
+    )
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

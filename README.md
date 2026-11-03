@@ -2,7 +2,7 @@
 
 Учебный оркестратор тестовых платежей. Деньги, получатели и каналы вымышлены.
 
-В рамках **TBPO-5** добавлена основа `payment-service`: FastAPI, настройки из окружения, асинхронное подключение к PostgreSQL 16, модели и первая миграция Alembic. **TBPO-10** добавляет получение платежа и его попыток; **TBPO-11** — создание платежа с идемпотентностью и атомарной записью первой попытки через канал A и команды outbox. **TBPO-14** добавляет Kafka и отдельный outbox publisher. Executor, обработка результатов и динамическая маршрутизация добавляются следующими задачами.
+В рамках **TBPO-5** добавлена основа `payment-service`: FastAPI, настройки из окружения, асинхронное подключение к PostgreSQL 16, модели и первая миграция Alembic. **TBPO-10** добавляет получение платежа и его попыток; **TBPO-11** — создание платежа с идемпотентностью и атомарной записью первой попытки через канал A и команды outbox. **TBPO-14** добавляет Kafka и отдельный outbox publisher. **TBPO-15** добавляет [основу executor](services/executor/README.md) с отдельной БД и идемпотентной регистрацией команд. Kafka consumer executor, исполнение, обработка результатов и динамическая маршрутизация добавляются следующими задачами.
 
 ## Быстрый запуск в Docker
 
@@ -131,6 +131,7 @@ source .venv/bin/activate
 python -m pip install -r requirements-dev.lock
 python -m pip install --no-deps -e .
 python -m pip install --no-deps -e libs/contracts
+python -m pip install --no-deps -e services/executor
 cp .env.example .env
 docker compose up -d --wait postgres
 alembic upgrade head
@@ -207,15 +208,16 @@ pytest -q -m "not integration"
 TEST_DATABASE_URL=postgresql+asyncpg://payment:payment@127.0.0.1:55432/postgres pytest -q
 ```
 
-Полный набор с настоящей Kafka (топик должен быть создан; production worker на время тестов остановлен):
+Полный набор payment, executor и contracts с настоящей Kafka (топик должен быть создан; production worker на время тестов остановлен; обе PostgreSQL запущены):
 
 ```sh
 TEST_DATABASE_URL=postgresql+asyncpg://payment:payment@127.0.0.1:55432/postgres \
-TEST_KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:19092 pytest -q
+TEST_KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:19092 \
+TEST_EXECUTOR_DATABASE_URL=postgresql+asyncpg://executor:executor@127.0.0.1:55433/postgres pytest -q
 ```
 
 Kafka-тесты читают только сообщения своего уникального payment_id и не удаляют топик. Они проверяют обычную доставку и реальную повторную отправку после Kafka ack без commit БД. Без `TEST_KAFKA_BOOTSTRAP_SERVERS` эти два теста пропускаются; тесты publisher с PostgreSQL и подставным отправителем продолжают проверять таймаут, отмену, откат и параллельные worker. В CI Kafka запускается автоматически и пропусков этих проверок нет.
 
-`TEST_DATABASE_URL` задаётся явно и указывает на локальный/тестовый PostgreSQL. Пользователю нужно право `CREATE DATABASE`: тесты создают базы `tbpo5_test_<uuid>` и удаляют только эти базы. Без этой переменной интеграционные тесты пропускаются. `pytest` из корня запускает тесты payment и контрактов; GitHub Actions устанавливает оба пакета, задаёт переменную и выполняет все проверки на PostgreSQL 16.
+`TEST_DATABASE_URL` задаётся явно и указывает на локальный/тестовый PostgreSQL. Пользователю нужно право `CREATE DATABASE`: тесты создают базы `tbpo5_test_<uuid>` и удаляют только эти базы. Без этой переменной интеграционные тесты пропускаются. `pytest` из корня запускает тесты payment, executor и контрактов. Тесты executor требуют отдельную `TEST_EXECUTOR_DATABASE_URL`; без неё интеграционные проверки executor пропускаются. [Запуск executor и его тестов](services/executor/README.md). GitHub Actions устанавливает все три пакета и выполняет полный набор на двух PostgreSQL 16 и Kafka.
 
 Зависимости закреплены в двух lock-файлах. Для обновления после изменения `pyproject.toml` используйте `uv pip compile pyproject.toml -o requirements.lock` и `uv pip compile pyproject.toml --extra dev -o requirements-dev.lock` под Python 3.12.
