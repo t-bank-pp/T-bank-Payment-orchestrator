@@ -1,5 +1,6 @@
 from contracts.commands import ExecuteAttempt
 from contracts.envelope import Envelope
+from contracts.events import AttemptResult
 
 
 def encode(message: Envelope) -> bytes:
@@ -8,3 +9,7 @@ def encode(message: Envelope) -> bytes:
 
 def decode_execute_attempt(raw: bytes) -> ExecuteAttempt:
     return ExecuteAttempt.model_validate_json(raw)
+
+
+def decode_attempt_result(raw: bytes) -> AttemptResult:
+    return AttemptResult.model_validate_json(raw)
