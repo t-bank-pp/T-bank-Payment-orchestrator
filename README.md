@@ -21,7 +21,7 @@ docker compose up -d --wait payment payment-worker
 - Readiness: <http://localhost:8000/health/ready> — выполняет `SELECT 1`, возвращает 503 при недоступной БД.
 - Kafka с хоста: `127.0.0.1:19092`; из контейнеров: `kafka:9092`.
 
-`kafka-storage-init` подготавливает права выделенного тома, сам брокер работает от пользователя appuser (1000). `kafka-init` создаёт `attempt.commands` с тремя партициями и одной репликой перед запуском worker. Это локальная конфигурация с одним брокером и PLAINTEXT; порты опубликованы только на loopback.
+`kafka-storage-init` подготавливает права выделенного тома, сам брокер работает от пользователя appuser (1000). `kafka-init` создаёт `attempt.commands` и `attempt.events` с тремя партициями и одной репликой на топик перед запуском worker. Это локальная конфигурация с одним брокером и PLAINTEXT; порты опубликованы только на loopback.
 
 API можно запустить без Kafka командой `docker compose up -d --wait payment`: он продолжит сохранять команды в PostgreSQL. Publisher — отдельный процесс, а не фоновая задача внутри API.
 
@@ -60,6 +60,21 @@ python -m payment.worker
 ```
 
 Подробности клиента и локального образа: [aiokafka producer](https://aiokafka.readthedocs.io/en/stable/producer.html), [Apache Kafka Docker](https://kafka.apache.org/41/getting-started/docker/).
+
+## Контракт результата попытки
+
+`AttemptResult` версии `1` описывает результат Executor для Payment в топике
+`attempt.events`. Ключ Kafka — строковый `payment_id` из конверта в UTF-8.
+При создании события копируются `payment_id`, `attempt_id`, `correlation_id` и
+`data.channel_id` из команды. Результат получает собственный `event_id` и время
+фиксации исхода в UTC. При повторной отправке используется сохранённое событие.
+
+Примеры JSON: [успех](libs/contracts/examples/attempt_result_succeeded.json),
+[отказ](libs/contracts/examples/attempt_result_failed.json),
+[неопределённый исход](libs/contracts/examples/attempt_result_unknown.json).
+`provider_operation_id` может отсутствовать или быть `null`. Значение `unknown`
+означает, что канал не подтвердил исход. Публикация и применение результата
+относятся к TBPO-21–23.
 
 ## Создание платежа
 
