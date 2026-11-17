@@ -20,7 +20,14 @@ async def test_migration_roundtrip_and_model_consistency(empty_database):
     try:
         async with db.engine.connect() as conn:
             tables = await conn.run_sync(lambda c: inspect(c).get_table_names())
-            assert set(tables) == {"payments", "payment_attempts", "outbox", "alembic_version"}
+            assert set(tables) == {
+                "payments",
+                "payment_attempts",
+                "outbox",
+                "inbox",
+                "payment_rejections",
+                "alembic_version",
+            }
             columns = await conn.run_sync(lambda c: inspect(c).get_columns("payments"))
             by_name = {c["name"]: c for c in columns}
             assert isinstance(by_name["amount_minor"]["type"], BigInteger)

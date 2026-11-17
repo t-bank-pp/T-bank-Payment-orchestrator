@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -91,3 +92,35 @@ class OutboxMessage(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class InboxEvent(Base):
+    __tablename__ = "inbox"
+
+    event_id: Mapped[UUID] = mapped_column(primary_key=True)
+    # v1 accepts one immutable result per attempt. Refinements need a versioned protocol.
+    attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey("payment_attempts.attempt_id", ondelete="RESTRICT"), unique=True
+    )
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RejectedResult(Base):
+    __tablename__ = "payment_rejections"
+    __table_args__ = (
+        CheckConstraint("partition >= 0 AND kafka_offset >= 0", name="valid_position"),
+    )
+
+    topic: Mapped[str] = mapped_column(String(255), primary_key=True)
+    partition: Mapped[int] = mapped_column(primary_key=True)
+    kafka_offset: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    reason: Mapped[str] = mapped_column(String(32))
+    raw_key: Mapped[bytes | None] = mapped_column(LargeBinary)
+    raw_value: Mapped[bytes | None] = mapped_column(LargeBinary)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

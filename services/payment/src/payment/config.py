@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     publisher_poll_interval: float = Field(default=0.5, gt=0, le=60)
     publisher_retry_interval: float = Field(default=1, gt=0, le=60)
     publisher_shutdown_timeout: float = Field(default=5, gt=0, le=60)
+    consumer_group: str = Field(default="payment-results-v1", min_length=1)
+    consumer_request_timeout: float = Field(default=5, ge=1, le=60)
+    consumer_processing_timeout: float = Field(default=10, gt=0, le=60)
+    consumer_poll_interval: float = Field(default=1, gt=0, le=5)
+    consumer_retry_interval: float = Field(default=1, gt=0, le=60)
+    consumer_shutdown_timeout: float = Field(default=5, gt=0, le=60)
 
     @field_validator("database_url")
     @classmethod

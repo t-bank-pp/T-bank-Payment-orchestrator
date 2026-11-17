@@ -199,6 +199,24 @@ services:
     restart: unless-stopped
     stop_grace_period: 20s
 
+  payment-consumer:
+    build:
+      context: .
+      dockerfile: services/payment/Dockerfile
+    command: ["python", "-m", "payment.consumer"]
+    environment:
+      PAYMENT_DATABASE_URL: postgresql+asyncpg://payment:payment@postgres:5432/payment_db
+      PAYMENT_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PAYMENT_CONSUMER_GROUP: payment-results-v1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
 volumes:
   demo_channel:
   executor_postgres:
