@@ -14,6 +14,7 @@ from sqlalchemy import func, select, update
 from executor.channel_a import ChannelA, ExecutionResult
 from executor.config import Settings, get_settings
 from executor.db.models import ExecutorAttempt
+from executor.db.outbox import add_attempt_result
 from executor.db.session import Database
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ async def claim_next(database: Database, lease_seconds: float) -> Claim | None:
 
 async def expire_leases(database: Database) -> None:
     async with database.sessions() as session, session.begin():
-        await session.execute(
+        expired = await session.scalars(
             update(ExecutorAttempt)
             .where(
                 ExecutorAttempt.state == "in_progress",
@@ -65,7 +66,10 @@ async def expire_leases(database: Database) -> None:
                 lease_token=None,
                 lease_expires_at=None,
             )
+            .returning(ExecutorAttempt)
         )
+        for attempt in expired:
+            add_attempt_result(session, attempt)
 
 
 async def finish_claim(database: Database, claim: Claim, result: ExecutionResult) -> bool:
@@ -87,8 +91,10 @@ async def finish_claim(database: Database, claim: Claim, result: ExecutionResult
                 lease_token=None,
                 lease_expires_at=None,
             )
-            .returning(ExecutorAttempt.attempt_id)
+            .returning(ExecutorAttempt)
         )
+        if saved is not None:
+            add_attempt_result(session, saved)
     return saved is not None
 
 
