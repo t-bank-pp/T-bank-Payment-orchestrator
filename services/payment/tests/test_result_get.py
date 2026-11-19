@@ -4,14 +4,12 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from contracts import AttemptResult, decode_execute_attempt
+from contracts import ATTEMPT_EVENTS, AttemptResult, decode_execute_attempt, encode
 from payment.config import Settings
-from payment.consumer import store_record
+from payment.consumer import Record, store_record
 from payment.db.models import OutboxMessage
 from payment.main import create_app
 from sqlalchemy import select
-
-from .test_result_consumer import record_for
 
 pytestmark = pytest.mark.integration
 
@@ -51,11 +49,12 @@ async def test_get_reflects_event_and_duplicate(migrated_database, outcome, stat
             outcome=outcome,
             reason_code="GET_TEST",
         )
-        assert await store_record(db, record_for(event)) == "accepted"
+        record = Record(ATTEMPT_EVENTS, 0, 0, payment_id.encode(), encode(event))
+        assert await store_record(db, record) == "accepted"
         response = await client.get("/payments/" + payment_id)
         assert response.status_code == 200
         after = response.json()
         assert after["status"] == status
         assert after["attempts"] == [{**before["attempts"][0], "outcome": outcome}]
-        assert await store_record(db, record_for(event, offset=1)) == "duplicate"
+        assert await store_record(db, record) == "duplicate"
         assert (await client.get("/payments/" + payment_id)).json() == after
