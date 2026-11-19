@@ -55,6 +55,7 @@ class PaymentAttempt(Base):
     __table_args__ = (
         UniqueConstraint("payment_id", "number"),
         CheckConstraint("number > 0", name="positive_number"),
+        CheckConstraint("result_version >= 0", name="nonnegative_result_version"),
         CheckConstraint(
             "outcome IS NULL OR outcome IN ('succeeded', 'failed', 'unknown')", name="valid_outcome"
         ),
@@ -67,6 +68,8 @@ class PaymentAttempt(Base):
     number: Mapped[int] = mapped_column(Integer)
     channel_id: Mapped[str] = mapped_column(String(32))
     outcome: Mapped[str | None] = mapped_column(String(16))
+    result_version: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    provider_operation_id: Mapped[str | None] = mapped_column(String(255))
     reason_code: Mapped[str | None] = mapped_column(String(100))
     decision: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -96,12 +99,13 @@ class OutboxMessage(Base):
 
 class InboxEvent(Base):
     __tablename__ = "inbox"
+    __table_args__ = (UniqueConstraint("attempt_id", "state_version"),)
 
     event_id: Mapped[UUID] = mapped_column(primary_key=True)
-    # v1 accepts one immutable result per attempt. Refinements need a versioned protocol.
     attempt_id: Mapped[UUID] = mapped_column(
-        ForeignKey("payment_attempts.attempt_id", ondelete="RESTRICT"), unique=True
+        ForeignKey("payment_attempts.attempt_id", ondelete="RESTRICT")
     )
+    state_version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     payload_hash: Mapped[str] = mapped_column(String(64))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     received_at: Mapped[datetime] = mapped_column(
