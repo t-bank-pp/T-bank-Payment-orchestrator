@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     LargeBinary,
     String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -27,6 +28,7 @@ class ExecutorAttempt(Base):
             "state IN ('queued','in_progress','succeeded','failed','unknown')",
             name="ck_executor_attempts_state",
         ),
+        CheckConstraint("state_version >= 0", name="ck_executor_attempts_version"),
         CheckConstraint(
             "(state = 'in_progress' AND lease_token IS NOT NULL AND lease_expires_at IS NOT NULL) "
             "OR (state <> 'in_progress' AND lease_token IS NULL AND lease_expires_at IS NULL)",
@@ -40,6 +42,7 @@ class ExecutorAttempt(Base):
     command_hash: Mapped[str] = mapped_column(String(64))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     state: Mapped[str] = mapped_column(String(32), server_default="queued")
+    state_version: Mapped[int] = mapped_column(server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     lease_token: Mapped[UUID | None] = mapped_column()
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -66,6 +69,7 @@ class InboxEvent(Base):
 class OutboxMessage(Base):
     __tablename__ = "outbox"
     __table_args__ = (
+        UniqueConstraint("attempt_id", "state_version", name="uq_executor_outbox_attempt_version"),
         Index(
             "ix_executor_outbox_unpublished", "created_at", postgresql_where="published_at IS NULL"
         ),
@@ -73,8 +77,9 @@ class OutboxMessage(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
     attempt_id: Mapped[UUID] = mapped_column(
-        ForeignKey("executor_attempts.attempt_id", ondelete="RESTRICT"), unique=True
+        ForeignKey("executor_attempts.attempt_id", ondelete="RESTRICT")
     )
+    state_version: Mapped[int] = mapped_column(server_default="1")
     topic: Mapped[str] = mapped_column(String(255))
     message_key: Mapped[str] = mapped_column(String(36))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)

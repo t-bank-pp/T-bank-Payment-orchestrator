@@ -61,6 +61,7 @@ async def expire_leases(database: Database) -> None:
             )
             .values(
                 state="unknown",
+                state_version=1,
                 reason_code="EXECUTION_LEASE_EXPIRED",
                 finished_at=func.clock_timestamp(),
                 lease_token=None,
@@ -84,6 +85,7 @@ async def finish_claim(database: Database, claim: Claim, result: ExecutionResult
             )
             .values(
                 state=result.outcome,
+                state_version=1,
                 reason_code=result.reason_code,
                 provider_operation_id=result.provider_operation_id,
                 result_payload=result.payload,
