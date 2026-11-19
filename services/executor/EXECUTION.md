@@ -11,10 +11,10 @@ Kafka читает executor-consumer. Поддерживается синхро�
 
 ```sh
 docker compose up -d --wait postgres executor-postgres kafka
-docker compose build payment payment-worker executor executor-consumer executor-worker executor-publisher demo-channel
+docker compose build payment payment-worker payment-consumer executor executor-consumer executor-worker executor-publisher demo-channel
 docker compose run --rm payment alembic upgrade head
 docker compose run --rm executor alembic -c executor-alembic.ini upgrade head
-docker compose --profile demo up -d --wait payment executor payment-worker executor-consumer demo-channel executor-worker executor-publisher
+docker compose --profile demo up -d --wait payment executor payment-worker payment-consumer executor-consumer demo-channel executor-worker executor-publisher
 ```
 
 Профиль demo явно включает worker исполнения и имитатор. Без него обычный запуск
@@ -35,10 +35,12 @@ Swagger `/docs`. Имитатор не подключается к банкам.
 Перезапуск контейнера сохраняет журнал. Тесты используют отдельные SQLite-файлы.
 Это локальный имитатор, а не платёжная инфраструктура.
 
-**Payment пока остаётся in_progress:** результат хранится в executor_attempts.
 TBPO-21 сохраняет исход и событие AttemptResult в executor outbox одной транзакцией.
-TBPO-22 публикует результат в attempt.events отдельным процессом. Применение результата
-в Payment, callbacks и сверка unknown добавляются отдельно.
+TBPO-22 публикует результат в attempt.events отдельным процессом. Consumer Payment
+из TBPO-23 применяет первый результат: succeeded, failed или needs_review для unknown.
+GET /payments/{id} отражает новый статус и outcome попытки.
+Сверка и подписанные callbacks описаны в [RESULTS.md](RESULTS.md). Они создают
+уточнения v2 и включаются после обновления Payment по TBPO-32.
 
 Миграция outbox дозаполняет события для существующих завершённых попыток,
 используя исходные идентификаторы, время результата и причину. После остановки
