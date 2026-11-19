@@ -11,10 +11,10 @@ Kafka читает executor-consumer. Поддерживается синхро�
 
 ```sh
 docker compose up -d --wait postgres executor-postgres kafka
-docker compose build payment payment-worker executor executor-consumer executor-worker demo-channel
+docker compose build payment payment-worker executor executor-consumer executor-worker executor-publisher demo-channel
 docker compose run --rm payment alembic upgrade head
 docker compose run --rm executor alembic -c executor-alembic.ini upgrade head
-docker compose --profile demo up -d --wait payment executor payment-worker executor-consumer demo-channel executor-worker
+docker compose --profile demo up -d --wait payment executor payment-worker executor-consumer demo-channel executor-worker executor-publisher
 ```
 
 Профиль demo явно включает worker исполнения и имитатор. Без него обычный запуск
@@ -37,8 +37,8 @@ Swagger `/docs`. Имитатор не подключается к банкам.
 
 **Payment пока остаётся in_progress:** результат хранится в executor_attempts.
 TBPO-21 сохраняет исход и событие AttemptResult в executor outbox одной транзакцией.
-Публикация события, итоговый статус API, callbacks и сверка unknown добавляются
-отдельно.
+TBPO-22 публикует результат в attempt.events отдельным процессом. Применение результата
+в Payment, callbacks и сверка unknown добавляются отдельно.
 
 Миграция outbox дозаполняет события для существующих завершённых попыток,
 используя исходные идентификаторы, время результата и причину. После остановки
@@ -46,6 +46,26 @@ TBPO-21 сохраняет исход и событие AttemptResult в executo
 подбирает результаты, записанные старой версией после миграции. Она безопасна при
 повторе и параллельном запуске, не вызывает канал. На попытку сохраняется один
 результат этого этапа. Downgrade отказывается удалять outbox с событиями.
+
+## Публикация результата (TBPO-22)
+
+Локально запускайте `python -m executor.publisher`, в Compose -
+`docker compose up -d executor-publisher` после обновления схемы executor.
+Один проход блокирует одну строку outbox через FOR UPDATE SKIP LOCKED. Publisher
+передаёт сохранённые payload и ключ payment_id, ждёт подтверждения Kafka и только
+затем фиксирует published_at. Повторы сохраняют event_id, время и исход.
+
+Доставка at-least-once. Если Kafka приняла событие, а commit БД не состоялся,
+оно будет отправлено повторно. Consumer Payment дедуплицирует его по event_id.
+Producer использует acks=all и enable_idempotence=True. После ошибки процесс
+закрывает producer и переподключается. Зависшее закрытие завершает процесс,
+Compose перезапускает его. SIGINT/SIGTERM прерывает ожидание очереди.
+
+Настройки EXECUTOR_PUBLISHER_SEND_TIMEOUT (5 секунд на проход, включая БД),
+EXECUTOR_PUBLISHER_POLL_INTERVAL (0.5), EXECUTOR_PUBLISHER_RETRY_INTERVAL (1),
+EXECUTOR_PUBLISHER_SHUTDOWN_TIMEOUT (5) читаются из окружения. При увеличении
+таймаутов увеличьте stop_grace_period. Масштабирование -
+`docker compose up -d --scale executor-publisher=2 executor-publisher`.
 
 ## Захват и сохранение
 
