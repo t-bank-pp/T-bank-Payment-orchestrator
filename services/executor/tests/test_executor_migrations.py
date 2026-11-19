@@ -17,6 +17,7 @@ async def test_migration_round_trip_and_metadata_match(executor_database, execut
             "inbox",
             "executor_rejections",
             "outbox",
+            "executor_callbacks",
         }
     await db.engine.dispose()
     executor_migrate(url, "downgrade", "base")

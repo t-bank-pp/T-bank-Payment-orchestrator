@@ -44,3 +44,28 @@ EXECUTOR_RECONCILIATION_REQUEST_TIMEOUT - общий предел HTTP (5 сек
 БД ограничена EXECUTOR_EXECUTION_DATABASE_TIMEOUT. Compose-процесс включается
 явно после обновления consumer Payment до TBPO-32:
 `docker compose --profile demo --profile reconciliation up -d executor-reconciliation`.
+
+## Подписанный callback (TBPO-30)
+
+POST /callbacks/{channel_id} принимает JSON с event_id, occurred_at (UTC),
+payment_id, attempt_id, channel_id, outcome (succeeded/failed), reason_code
+и provider_operation_id. Это контракт учебного канала. Произвольному провайдеру
+нужен адаптер к его формату и подписи.
+
+Подпись X-Callback-Signature - hex HMAC-SHA256 от
+`<X-Callback-Timestamp>.<исходные байты тела>`. X-Callback-Timestamp содержит
+Unix-время отправки в секундах. EXECUTOR_CALLBACK_MAX_AGE задаёт допустимое
+отклонение (300 секунд). Для повторной доставки отправитель может поставить
+новую подпись и время отправки, сохранив event_id и тело.
+
+EXECUTOR_CALLBACK_SECRETS задаёт JSON-словарь секретов по каналу, например
+`{"A":"<случайный секрет длиной не менее 32 символов>"}`. По умолчанию словарь
+пустой, endpoint возвращает 503. Секреты следует включать после TBPO-32.
+Для реального окружения подпись и транспорт согласуются с провайдером.
+
+Ответ 200 означает commit состояния, outbox и записи executor_callbacks.
+Повтор того же event_id с теми же данными безопасен. Изменённое тело того же
+event_id, другой канал/платёж/операция и противоречащий подтверждённый исход
+дают 409. Отсутствующая попытка даёт 404 с возможностью доставки позже,
+неверная подпись или время - 401, неверное тело - 422. Размер тела ограничен
+16 КиБ. Ошибка БД откатывает все изменения, отправитель повторяет доставку.

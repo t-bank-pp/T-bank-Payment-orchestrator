@@ -76,6 +76,7 @@ services:
       dockerfile: services/executor/Dockerfile
     environment:
       EXECUTOR_DATABASE_URL: postgresql+asyncpg://executor:executor@executor-postgres:5432/executor_db
+      EXECUTOR_CALLBACK_SECRETS: ${EXECUTOR_CALLBACK_SECRETS:-{}}
     ports:
       - "127.0.0.1:8001:8001"
     depends_on:
