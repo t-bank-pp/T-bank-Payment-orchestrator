@@ -88,6 +88,20 @@ class OutboxMessage(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CallbackReceipt(Base):
+    __tablename__ = "executor_callbacks"
+
+    event_id: Mapped[UUID] = mapped_column(primary_key=True)
+    attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey("executor_attempts.attempt_id", ondelete="RESTRICT")
+    )
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class RejectedCommand(Base):
     __tablename__ = "executor_rejections"
     __table_args__ = (

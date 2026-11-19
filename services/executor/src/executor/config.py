@@ -31,6 +31,18 @@ class Settings(BaseSettings):
     reconciliation_interval: float = Field(default=30, ge=1, le=3600)
     reconciliation_poll_interval: float = Field(default=0.5, gt=0, le=30)
     reconciliation_request_timeout: float = Field(default=5, gt=0, le=30)
+    callback_secrets: dict[str, SecretStr] = Field(default_factory=dict)
+    callback_max_age: float = Field(default=300, gt=0, le=3600)
+
+    @field_validator("callback_secrets")
+    @classmethod
+    def validate_callback_secrets(cls, value: dict[str, SecretStr]) -> dict[str, SecretStr]:
+        if any(
+            not channel.strip() or len(secret.get_secret_value()) < 32
+            for channel, secret in value.items()
+        ):
+            raise ValueError("Each callback channel needs a secret of at least 32 characters")
+        return value
 
     @model_validator(mode="after")
     def validate_execution_lease(self) -> "Settings":
