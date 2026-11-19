@@ -45,25 +45,39 @@ class ChannelA:
                     headers={"Idempotency-Key": str(command.attempt_id)},
                     timeout=self.timeout,
                 )
-            if response.status_code != 200:
-                return ExecutionResult("unknown", "CHANNEL_HTTP_ERROR")
-            reply = ChannelReply.model_validate_json(response.content)
-            if reply.attempt_id != command.attempt_id:
-                return ExecutionResult("unknown", "CHANNEL_ATTEMPT_MISMATCH")
-            outcome: Literal["succeeded", "failed", "unknown"] = "unknown"
-            if reply.outcome == "succeeded":
-                outcome = "succeeded"
-            elif reply.outcome == "failed":
-                outcome = "failed"
-            return ExecutionResult(
-                outcome,
-                reply.reason_code,
-                reply.provider_operation_id,
-                reply.model_dump(mode="json"),
-            )
+            return self._read_reply(command, response)
         except (TimeoutError, httpx.TimeoutException):
             return ExecutionResult("unknown", "CHANNEL_TIMEOUT")
         except httpx.RequestError:
             return ExecutionResult("unknown", "CHANNEL_UNAVAILABLE")
         except ValidationError:
             return ExecutionResult("unknown", "CHANNEL_RESPONSE_INVALID")
+
+    async def status(self, command: ExecuteAttempt) -> ExecutionResult:
+        try:
+            async with asyncio.timeout(self.timeout):
+                response = await self.client.get(
+                    f"/attempts/{command.attempt_id}", timeout=self.timeout
+                )
+            return self._read_reply(command, response)
+        except (TimeoutError, httpx.TimeoutException):
+            return ExecutionResult("unknown", "CHANNEL_TIMEOUT")
+        except httpx.RequestError:
+            return ExecutionResult("unknown", "CHANNEL_UNAVAILABLE")
+        except ValidationError:
+            return ExecutionResult("unknown", "CHANNEL_RESPONSE_INVALID")
+
+    def _read_reply(self, command: ExecuteAttempt, response: httpx.Response) -> ExecutionResult:
+        if response.status_code != 200:
+            return ExecutionResult("unknown", "CHANNEL_HTTP_ERROR")
+        reply = ChannelReply.model_validate_json(response.content)
+        if reply.attempt_id != command.attempt_id:
+            return ExecutionResult("unknown", "CHANNEL_ATTEMPT_MISMATCH")
+        outcome: Literal["succeeded", "failed", "unknown"] = "unknown"
+        if reply.outcome == "succeeded":
+            outcome = "succeeded"
+        elif reply.outcome == "failed":
+            outcome = "failed"
+        return ExecutionResult(
+            outcome, reply.reason_code, reply.provider_operation_id, reply.model_dump(mode="json")
+        )
