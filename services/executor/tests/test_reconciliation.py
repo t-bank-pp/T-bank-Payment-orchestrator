@@ -4,8 +4,8 @@ from uuid import uuid4
 import httpx
 import pytest
 from executor.channel_a import ChannelA
-from executor.demo_channel import DemoSettings, create_app
 from executor.db.models import ExecutorAttempt
+from executor.demo_channel import DemoSettings, create_app
 from executor.execution import execute_next
 from executor.reconciliation import claim_reconciliation, reconcile_next, run_reconciliation
 from sqlalchemy import func, update
