@@ -95,7 +95,8 @@ async def receive_callback(channel_id: str, request: Request) -> dict[str, objec
         signed_at = int(timestamp)
     except ValueError:
         raise HTTPException(401, "Invalid callback signature") from None
-    if abs(time.time() - signed_at) > settings.callback_max_age:
+    # Keep arithmetic integral: an untrusted huge timestamp must not overflow a float.
+    if abs(int(time.time()) - signed_at) > settings.callback_max_age:
         raise HTTPException(401, "Callback timestamp is outside the accepted window")
     body = b""
     async for chunk in request.stream():
