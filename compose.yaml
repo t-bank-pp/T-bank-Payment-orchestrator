@@ -91,6 +91,23 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
 
+  executor-publisher:
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    command: ["python", "-m", "executor.publisher"]
+    environment:
+      EXECUTOR_DATABASE_URL: postgresql+asyncpg://executor:executor@executor-postgres:5432/executor_db
+      EXECUTOR_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      executor-postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 20s
+
   postgres:
     image: postgres:16-alpine
     environment:
