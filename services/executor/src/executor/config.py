@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     execution_database_timeout: float = Field(default=5, gt=0, le=30)
     execution_lease_seconds: float = Field(default=60, gt=0, le=600)
     execution_poll_interval: float = Field(default=0.5, gt=0, le=30)
+    reconciliation_interval: float = Field(default=30, ge=1, le=3600)
+    reconciliation_poll_interval: float = Field(default=0.5, gt=0, le=30)
+    reconciliation_request_timeout: float = Field(default=5, gt=0, le=30)
 
     @model_validator(mode="after")
     def validate_execution_lease(self) -> "Settings":

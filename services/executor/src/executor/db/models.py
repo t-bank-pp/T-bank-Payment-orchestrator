@@ -50,6 +50,7 @@ class ExecutorAttempt(Base):
     reason_code: Mapped[str | None] = mapped_column(String(100))
     provider_operation_id: Mapped[str | None] = mapped_column(String(255))
     result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    next_reconcile_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class InboxEvent(Base):

@@ -36,6 +36,24 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
 
+  executor-reconciliation:
+    profiles: ["reconciliation"]
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    command: ["python", "-m", "executor.reconciliation"]
+    environment:
+      EXECUTOR_DATABASE_URL: postgresql+asyncpg://executor:executor@executor-postgres:5432/executor_db
+      EXECUTOR_CHANNEL_A_BASE_URL: http://demo-channel:18080
+    depends_on:
+      executor-postgres:
+        condition: service_healthy
+      demo-channel:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
   executor-postgres:
     image: postgres:16-alpine
     environment:

@@ -28,3 +28,19 @@ publisher могут доставить версии в обратном пор�
 Миграция сохраняет версии существующих результатов и заменяет уникальность
 attempt_id в outbox на пару attempt_id/state_version. Downgrade отклоняется
 при наличии уточнённых событий, чтобы сохранить историю.
+
+## Запрос статуса (TBPO-29)
+
+`python -m executor.reconciliation` выбирает unknown и сохраняет время следующей
+проверки до HTTP. После падения worker проверка станет доступна по расписанию.
+Адаптер A выполняет GET /attempts/{attempt_id}; POST при сверке не используется.
+404, таймаут и неоднозначный ответ сохраняют unknown для следующей проверки.
+Подтверждённый ответ идёт через apply_confirmation, включая проверку известного
+provider_operation_id. HTTP выполняется вне транзакции БД.
+
+EXECUTOR_RECONCILIATION_INTERVAL задаёт интервал проверки попытки (30 секунд),
+EXECUTOR_RECONCILIATION_POLL_INTERVAL - ожидание пустой очереди (0.5 секунды),
+EXECUTOR_RECONCILIATION_REQUEST_TIMEOUT - общий предел HTTP (5 секунд).
+БД ограничена EXECUTOR_EXECUTION_DATABASE_TIMEOUT. Compose-процесс включается
+явно после обновления consumer Payment до TBPO-32:
+`docker compose --profile demo --profile reconciliation up -d executor-reconciliation`.
