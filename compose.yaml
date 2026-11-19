@@ -155,7 +155,10 @@ services:
         condition: service_healthy
     entrypoint: ["/bin/sh", "-ec"]
     command:
-      - /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic attempt.commands --partitions 3 --replication-factor 1
+      - |
+        for topic in attempt.commands attempt.events; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1
+        done
     restart: "no"
 
   payment:

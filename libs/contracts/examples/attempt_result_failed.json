@@ -1,0 +1,15 @@
+{
+  "event_id": "500c2a1e-5b4d-4c8e-9a6f-1d2e3f4a5b62",
+  "occurred_at": "2026-10-26T12:00:02Z",
+  "payment_id": "0b9e8d7c-6a5f-4e3d-8c2b-1a0f9e8d7c62",
+  "attempt_id": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e62",
+  "correlation_id": "900c2a1e-5b4d-4c8e-9a6f-1d2e3f4a5b62",
+  "type": "AttemptResult",
+  "version": 1,
+  "data": {
+    "channel_id": "A",
+    "outcome": "failed",
+    "reason_code": "DEMO_DECLINED",
+    "provider_operation_id": "71d62f0f-38c1-4a80-b37f-84e777db5052"
+  }
+}
