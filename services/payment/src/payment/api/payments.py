@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from payment.api.schemas import (
     IdempotencyKey,
     PaymentResponse,
 )
+from payment.config import Settings
 from payment.db.queries import find_payment_with_attempts
 from payment.db.session import get_session
 from payment.use_cases.create_payment import IdempotencyConflict, create_payment
@@ -55,17 +56,20 @@ router = APIRouter(prefix="/payments", tags=["Payments"])
     },
 )
 async def post_payment(
+    request: Request,
     body: CreatePaymentRequest,
     idempotency_key: Annotated[IdempotencyKey, Header(alias="Idempotency-Key")],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CreatePaymentResponse | JSONResponse:
     try:
+        settings: Settings = request.app.state.settings
         payment_id = await create_payment(
             session,
             idempotency_key=idempotency_key,
             amount_minor=body.amount_minor,
             currency=body.currency,
             recipient=body.recipient,
+            channel_id=settings.fixed_channel_id,
         )
     except IdempotencyConflict:
         error = ErrorResponse(

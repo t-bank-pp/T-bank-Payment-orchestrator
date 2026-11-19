@@ -5,6 +5,7 @@ import json
 import sqlite3
 import time
 from contextlib import closing
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
@@ -22,14 +23,18 @@ class DemoSettings(BaseSettings):
     delay_seconds: float = Field(default=8, ge=0, le=30)
 
 
-class ChannelRequest(BaseModel):
+class LedgerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     attempt_id: UUID
     payment_id: UUID
-    channel_id: Literal["A"]
+    channel_id: Literal["A", "B", "C"]
     amount_minor: int = Field(strict=True, gt=0, le=9223372036854775807)
     currency: Literal["RUB"]
     recipient: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+class ChannelRequest(LedgerRequest):
+    channel_id: Literal["A"]
 
 
 class DemoStore:
@@ -43,9 +48,16 @@ class DemoStore:
                 "request_json TEXT NOT NULL, result_json TEXT NOT NULL, "
                 "charged_amount_minor INTEGER NOT NULL CHECK(charged_amount_minor >= 0))"
             )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS callback_outbox ("
+                "attempt_id TEXT PRIMARY KEY, event_id TEXT NOT NULL UNIQUE, "
+                "payload_json TEXT NOT NULL, available_at REAL NOT NULL, delivered_at REAL)"
+            )
             conn.commit()
 
-    def execute(self, request: ChannelRequest) -> ChannelReply:
+    def execute(
+        self, request: LedgerRequest, *, callback_delay: float | None = None
+    ) -> ChannelReply:
         body = json.dumps(request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
         body_hash = hashlib.sha256(body.encode()).hexdigest()
         with closing(sqlite3.connect(self.path, timeout=5, isolation_level=None)) as conn:
@@ -77,6 +89,28 @@ class DemoStore:
                             0 if declined else request.amount_minor,
                         ),
                     )
+                if callback_delay is not None:
+                    payload = {
+                        "event_id": str(uuid4()),
+                        "occurred_at": datetime.now(UTC).isoformat(),
+                        "payment_id": str(request.payment_id),
+                        "attempt_id": str(request.attempt_id),
+                        "channel_id": request.channel_id,
+                        "outcome": result.outcome,
+                        "reason_code": result.reason_code,
+                        "provider_operation_id": result.provider_operation_id,
+                    }
+                    conn.execute(
+                        "INSERT INTO callback_outbox "
+                        "(attempt_id,event_id,payload_json,available_at) VALUES (?,?,?,?) "
+                        "ON CONFLICT(attempt_id) DO NOTHING",
+                        (
+                            str(request.attempt_id),
+                            payload["event_id"],
+                            json.dumps(payload),
+                            time.time() + callback_delay,
+                        ),
+                    )
                 conn.commit()
                 return result
             except BaseException:
@@ -91,6 +125,35 @@ class DemoStore:
         if row is None:
             raise HTTPException(404, "Operation not found")
         return ChannelReply.model_validate_json(row[0])
+
+    def pending_callback(self) -> tuple[str, str] | None:
+        with closing(sqlite3.connect(self.path, timeout=5)) as conn:
+            row = conn.execute(
+                "SELECT attempt_id,payload_json FROM callback_outbox "
+                "WHERE delivered_at IS NULL AND available_at<=? ORDER BY available_at LIMIT 1",
+                (time.time(),),
+            ).fetchone()
+        if row is None:
+            return None
+        return str(row[0]), str(row[1])
+
+    def mark_callback_delivered(self, attempt_id: str) -> None:
+        with closing(sqlite3.connect(self.path, timeout=5)) as conn:
+            conn.execute(
+                "UPDATE callback_outbox SET delivered_at=? "
+                "WHERE attempt_id=? AND delivered_at IS NULL",
+                (time.time(), attempt_id),
+            )
+            conn.commit()
+
+    def retry_callback(self, attempt_id: str, delay: float) -> None:
+        with closing(sqlite3.connect(self.path, timeout=5)) as conn:
+            conn.execute(
+                "UPDATE callback_outbox SET available_at=? "
+                "WHERE attempt_id=? AND delivered_at IS NULL",
+                (time.time() + delay, attempt_id),
+            )
+            conn.commit()
 
 
 def create_app(settings: DemoSettings | None = None) -> FastAPI:

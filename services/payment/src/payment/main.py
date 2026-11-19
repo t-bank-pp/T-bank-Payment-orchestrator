@@ -20,6 +20,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         database = Database(settings)
         app.state.database = database
+        app.state.settings = settings
         try:
             yield
         finally:

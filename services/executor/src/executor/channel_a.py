@@ -1,19 +1,12 @@
-import asyncio
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 import httpx
 from contracts import ExecuteAttempt
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
-
-@dataclass(frozen=True)
-class ExecutionResult:
-    outcome: Literal["succeeded", "failed", "unknown"]
-    reason_code: str
-    provider_operation_id: str | None = None
-    payload: dict[str, Any] | None = None
+from executor.http_channel import ExecutionResult as ExecutionResult
+from executor.http_channel import HttpChannel
 
 
 class ChannelReply(BaseModel):
@@ -24,11 +17,8 @@ class ChannelReply(BaseModel):
     provider_operation_id: str = Field(min_length=1, max_length=255)
 
 
-class ChannelA:
+class ChannelA(HttpChannel):
     """Adapter for the documented synthetic channel contract, not a bank API."""
-
-    def __init__(self, client: httpx.AsyncClient, timeout: float):
-        self.client, self.timeout = client, timeout
 
     async def execute(self, command: ExecuteAttempt) -> ExecutionResult:
         body = {
@@ -36,36 +26,16 @@ class ChannelA:
             "payment_id": str(command.payment_id),
             "attempt_id": str(command.attempt_id),
         }
-        try:
-            # A total deadline in addition to HTTPX's per-phase limits.
-            async with asyncio.timeout(self.timeout):
-                response = await self.client.post(
-                    "/attempts",
-                    json=body,
-                    headers={"Idempotency-Key": str(command.attempt_id)},
-                    timeout=self.timeout,
-                )
-            return self._read_reply(command, response)
-        except (TimeoutError, httpx.TimeoutException):
-            return ExecutionResult("unknown", "CHANNEL_TIMEOUT")
-        except httpx.RequestError:
-            return ExecutionResult("unknown", "CHANNEL_UNAVAILABLE")
-        except ValidationError:
-            return ExecutionResult("unknown", "CHANNEL_RESPONSE_INVALID")
+        return await self._request(
+            command,
+            "POST",
+            "/attempts",
+            body=body,
+            headers={"Idempotency-Key": str(command.attempt_id)},
+        )
 
     async def status(self, command: ExecuteAttempt) -> ExecutionResult:
-        try:
-            async with asyncio.timeout(self.timeout):
-                response = await self.client.get(
-                    f"/attempts/{command.attempt_id}", timeout=self.timeout
-                )
-            return self._read_reply(command, response)
-        except (TimeoutError, httpx.TimeoutException):
-            return ExecutionResult("unknown", "CHANNEL_TIMEOUT")
-        except httpx.RequestError:
-            return ExecutionResult("unknown", "CHANNEL_UNAVAILABLE")
-        except ValidationError:
-            return ExecutionResult("unknown", "CHANNEL_RESPONSE_INVALID")
+        return await self._request(command, "GET", f"/attempts/{command.attempt_id}")
 
     def _read_reply(self, command: ExecuteAttempt, response: httpx.Response) -> ExecutionResult:
         if response.status_code != 200:
