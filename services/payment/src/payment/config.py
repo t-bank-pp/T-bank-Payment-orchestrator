@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,6 +12,7 @@ class Settings(BaseSettings):
 
     database_url: SecretStr
     app_name: str = "Payment service"
+    fixed_channel_id: Literal["A", "B", "C"] = "A"
     database_connect_timeout: float = Field(default=3, gt=0, le=30)
     kafka_bootstrap_servers: str = Field(default="127.0.0.1:19092", min_length=1)
     publisher_send_timeout: float = Field(default=5, gt=0, le=60)

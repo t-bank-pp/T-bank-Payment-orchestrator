@@ -18,6 +18,63 @@ services:
       retries: 5
     stop_grace_period: 40s
 
+  demo-channel-b:
+    profiles: ["channels"]
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    command: ["uvicorn", "executor.demo_extra_channels:create_b_app", "--factory", "--host", "0.0.0.0", "--port", "18080"]
+    environment:
+      DEMO_CHANNEL_DATABASE: /state/channel.sqlite3
+    volumes:
+      - demo_channel_b:/state
+    ports:
+      - "127.0.0.1:18081:18080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/health/ready', timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 5
+
+  demo-channel-c:
+    profiles: ["channels"]
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    command: ["uvicorn", "executor.demo_extra_channels:create_c_app", "--factory", "--host", "0.0.0.0", "--port", "18080"]
+    environment:
+      DEMO_CHANNEL_DATABASE: /state/channel.sqlite3
+    volumes:
+      - demo_channel_c:/state
+    ports:
+      - "127.0.0.1:18082:18080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/health/ready', timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 5
+
+  demo-callbacks:
+    profiles: ["callbacks"]
+    build:
+      context: .
+      dockerfile: services/executor/Dockerfile
+    command: ["python", "-m", "executor.demo_callback_delivery"]
+    environment:
+      DEMO_CALLBACK_DATABASE: /state/channel.sqlite3
+      DEMO_CALLBACK_URL: http://executor:8001/callbacks/C
+      DEMO_CALLBACK_SECRET: ${DEMO_CALLBACK_SECRET:-}
+    volumes:
+      - demo_channel_c:/state
+    depends_on:
+      executor:
+        condition: service_healthy
+      demo-channel-c:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+
   executor-worker:
     profiles: ["demo"]
     build:
@@ -27,6 +84,8 @@ services:
     environment:
       EXECUTOR_DATABASE_URL: postgresql+asyncpg://executor:executor@executor-postgres:5432/executor_db
       EXECUTOR_CHANNEL_A_BASE_URL: http://demo-channel:18080
+      EXECUTOR_CHANNEL_B_BASE_URL: http://demo-channel-b:18080
+      EXECUTOR_CHANNEL_C_BASE_URL: http://demo-channel-c:18080
     depends_on:
       executor-postgres:
         condition: service_healthy
@@ -45,6 +104,8 @@ services:
     environment:
       EXECUTOR_DATABASE_URL: postgresql+asyncpg://executor:executor@executor-postgres:5432/executor_db
       EXECUTOR_CHANNEL_A_BASE_URL: http://demo-channel:18080
+      EXECUTOR_CHANNEL_B_BASE_URL: http://demo-channel-b:18080
+      EXECUTOR_CHANNEL_C_BASE_URL: http://demo-channel-c:18080
     depends_on:
       executor-postgres:
         condition: service_healthy
@@ -203,6 +264,7 @@ services:
       dockerfile: services/payment/Dockerfile
     environment:
       PAYMENT_DATABASE_URL: postgresql+asyncpg://payment:payment@postgres:5432/payment_db
+      PAYMENT_FIXED_CHANNEL_ID: ${PAYMENT_FIXED_CHANNEL_ID:-A}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -254,6 +316,8 @@ services:
     stop_grace_period: 30s
 
 volumes:
+  demo_channel_b:
+  demo_channel_c:
   demo_channel:
   executor_postgres:
   payment_postgres:

@@ -1,5 +1,6 @@
 import hashlib
 import json
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ async def create_payment(
     amount_minor: int,
     currency: str,
     recipient: str,
+    channel_id: Literal["A", "B", "C"] = "A",
 ) -> UUID:
     """Accept validated, normalized fields and commit the whole payment atomically."""
     canonical_body = json.dumps(
@@ -47,5 +49,5 @@ async def create_payment(
                 raise IdempotencyConflict
             return existing.id
 
-        await create_first_attempt(session, payment)
+        await create_first_attempt(session, payment, channel_id=channel_id)
         return payment.id

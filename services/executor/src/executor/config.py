@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     publisher_retry_interval: float = Field(default=1, gt=0, le=60)
     publisher_shutdown_timeout: float = Field(default=5, gt=0, le=60)
     channel_a_base_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:18080")
+    channel_b_base_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:18081")
+    channel_c_base_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:18082")
     execution_request_timeout: float = Field(default=5, gt=0, le=30)
     execution_database_timeout: float = Field(default=5, gt=0, le=30)
     execution_lease_seconds: float = Field(default=60, gt=0, le=600)

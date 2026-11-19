@@ -116,6 +116,10 @@ pytest -q services/payment/tests/test_result*.py services/payment/tests/test_pos
 
 ## Создание платежа
 
+Три тестовых канала и полный сценарий отложенного подтверждения описаны в
+[инструкции Executor](services/executor/CHANNELS.md). Для нового платежа канал
+задаётся PAYMENT_FIXED_CHANNEL_ID (A, B или C, по умолчанию A).
+
 ```sh
 curl -i http://127.0.0.1:8000/payments \
   -H 'Content-Type: application/json' \

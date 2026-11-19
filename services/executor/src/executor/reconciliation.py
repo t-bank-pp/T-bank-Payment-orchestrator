@@ -2,14 +2,15 @@ import asyncio
 import json
 import logging
 import signal
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import Protocol
 
-import httpx
 from contracts import ExecuteAttempt, decode_execute_attempt
 from sqlalchemy import func, or_, select
 
-from executor.channel_a import ChannelA, ExecutionResult
+from executor.channel_a import ExecutionResult
+from executor.channels import channel_clients, select_channel
 from executor.config import Settings, get_settings
 from executor.confirmation import apply_confirmation
 from executor.db.models import ExecutorAttempt
@@ -47,15 +48,18 @@ async def claim_reconciliation(database: Database, interval: float) -> ExecuteAt
     return command
 
 
-async def reconcile_next(database: Database, channel: StatusReader, settings: Settings) -> bool:
+async def reconcile_next(
+    database: Database, channel: StatusReader | Mapping[str, StatusReader], settings: Settings
+) -> bool:
     async with asyncio.timeout(settings.execution_database_timeout):
         command = await claim_reconciliation(database, settings.reconciliation_interval)
     if command is None:
         return False
-    if command.data.channel_id != "A":
+    selected = select_channel(channel, command.data.channel_id)
+    if selected is None:
         return True
     async with asyncio.timeout(settings.reconciliation_request_timeout):
-        result = await channel.status(command)
+        result = await selected.status(command)
     async with asyncio.timeout(settings.execution_database_timeout):
         async with database.sessions() as session, session.begin():
             await apply_confirmation(
@@ -69,7 +73,10 @@ async def reconcile_next(database: Database, channel: StatusReader, settings: Se
 
 
 async def run_reconciliation(
-    database: Database, channel: StatusReader, settings: Settings, stop: asyncio.Event
+    database: Database,
+    channel: StatusReader | Mapping[str, StatusReader],
+    settings: Settings,
+    stop: asyncio.Event,
 ) -> None:
     while not stop.is_set():
         try:
@@ -93,12 +100,8 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
     try:
-        async with httpx.AsyncClient(
-            base_url=str(settings.channel_a_base_url), follow_redirects=False, trust_env=False
-        ) as client:
-            await run_reconciliation(
-                database, ChannelA(client, settings.reconciliation_request_timeout), settings, stop
-            )
+        async with channel_clients(settings, settings.reconciliation_request_timeout) as channels:
+            await run_reconciliation(database, channels, settings, stop)
     finally:
         await database.close()
         for sig in (signal.SIGINT, signal.SIGTERM):

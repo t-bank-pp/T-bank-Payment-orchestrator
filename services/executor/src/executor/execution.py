@@ -2,16 +2,17 @@ import asyncio
 import json
 import logging
 import signal
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
-import httpx
 from contracts import ExecuteAttempt, decode_execute_attempt
 from sqlalchemy import func, select, update
 
-from executor.channel_a import ChannelA, ExecutionResult
+from executor.channel_a import ExecutionResult
+from executor.channels import channel_clients, select_channel
 from executor.config import Settings, get_settings
 from executor.db.models import ExecutorAttempt
 from executor.db.outbox import add_attempt_result
@@ -100,7 +101,9 @@ async def finish_claim(database: Database, claim: Claim, result: ExecutionResult
     return saved is not None
 
 
-async def execute_next(database: Database, channel: Channel, settings: Settings) -> bool:
+async def execute_next(
+    database: Database, channel: Channel | Mapping[str, Channel], settings: Settings
+) -> bool:
     async with asyncio.timeout(settings.execution_database_timeout):
         await expire_leases(database)
         claim = await claim_next(database, settings.execution_lease_seconds)
@@ -108,11 +111,12 @@ async def execute_next(database: Database, channel: Channel, settings: Settings)
         return False
     try:
         command = decode_execute_attempt(json.dumps(claim.payload).encode())
-        if command.data.channel_id != "A":
+        selected = select_channel(channel, command.data.channel_id)
+        if selected is None:
             result = ExecutionResult("unknown", "UNSUPPORTED_CHANNEL")
         else:
             async with asyncio.timeout(settings.execution_request_timeout):
-                result = await channel.execute(command)
+                result = await selected.execute(command)
     except TimeoutError:
         result = ExecutionResult("unknown", "CHANNEL_TIMEOUT")
     except Exception as exc:
@@ -127,7 +131,10 @@ async def execute_next(database: Database, channel: Channel, settings: Settings)
 
 
 async def run_worker(
-    database: Database, channel: Channel, settings: Settings, stop: asyncio.Event
+    database: Database,
+    channel: Channel | Mapping[str, Channel],
+    settings: Settings,
+    stop: asyncio.Event,
 ) -> None:
     while not stop.is_set():
         try:
@@ -152,12 +159,8 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
     try:
-        async with httpx.AsyncClient(
-            base_url=str(settings.channel_a_base_url), follow_redirects=False, trust_env=False
-        ) as client:
-            await run_worker(
-                database, ChannelA(client, settings.execution_request_timeout), settings, stop
-            )
+        async with channel_clients(settings, settings.execution_request_timeout) as channels:
+            await run_worker(database, channels, settings, stop)
     finally:
         await database.close()
         for sig in (signal.SIGINT, signal.SIGTERM):

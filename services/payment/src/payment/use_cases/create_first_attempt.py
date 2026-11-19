@@ -1,4 +1,4 @@
-from typing import Final
+from typing import Final, Literal
 from uuid import uuid4
 
 from contracts import ExecuteAttempt, ExecuteAttemptData
@@ -12,7 +12,9 @@ FIXED_CHANNEL_ID: Final = "A"
 FIRST_ATTEMPT_NUMBER: Final = 1
 
 
-async def create_first_attempt(session: AsyncSession, payment: Payment) -> PaymentAttempt:
+async def create_first_attempt(
+    session: AsyncSession, payment: Payment, *, channel_id: Literal["A", "B", "C"] = "A"
+) -> PaymentAttempt:
     if payment.id is None:
         await session.flush()
 
@@ -20,8 +22,8 @@ async def create_first_attempt(session: AsyncSession, payment: Payment) -> Payme
         session,
         payment_id=payment.id,
         number=FIRST_ATTEMPT_NUMBER,
-        channel_id=FIXED_CHANNEL_ID,
-        decision={"strategy": "fixed", "selected_channel": FIXED_CHANNEL_ID},
+        channel_id=channel_id,
+        decision={"strategy": "fixed", "selected_channel": channel_id},
         attempt_id=uuid4(),
     )
     command = ExecuteAttempt.new(
@@ -29,7 +31,7 @@ async def create_first_attempt(session: AsyncSession, payment: Payment) -> Payme
         attempt_id=attempt.attempt_id,
         data=ExecuteAttemptData.model_validate(
             {
-                "channel_id": FIXED_CHANNEL_ID,
+                "channel_id": channel_id,
                 "amount_minor": payment.amount_minor,
                 "currency": payment.currency,
                 "recipient": payment.recipient,
