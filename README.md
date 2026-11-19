@@ -73,8 +73,46 @@ python -m payment.worker
 [отказ](libs/contracts/examples/attempt_result_failed.json),
 [неопределённый исход](libs/contracts/examples/attempt_result_unknown.json).
 `provider_operation_id` может отсутствовать или быть `null`. Значение `unknown`
-означает, что канал не подтвердил исход. Публикация и применение результата
-относятся к TBPO-21–23.
+означает, что канал не подтвердил исход.
+Публикация результата относится к TBPO-21–22; приём в Payment реализован в TBPO-23.
+
+### Приём результатов в Payment (TBPO-23)
+
+После миграций запустите `docker compose up -d --build payment-consumer` или
+`python -m payment.consumer` в локальном окружении. Consumer читает `attempt.events`
+в группе `payment-results-v1`, с отключённым auto-commit и `read_committed`.
+Настройки таймаутов и группы находятся в `.env.example`.
+
+Общий декодер проверяет `AttemptResult v1`, а consumer сверяет ключ Kafka с UTF-8
+представлением `payment_id`. Обработчик блокирует платёж и попытку, проверяет их
+связь, канал, корреляцию с сохранённой командой в outbox и актуальность попытки.
+Исходная команда должна оставаться в outbox для проверки корреляции.
+
+В одной транзакции сохраняются `inbox`, исход/причина/время завершения попытки,
+статус и увеличенная версия платежа. `succeeded` и `failed` становятся статусом
+платежа, `unknown` переводит его в `needs_review`. Новая попытка не создаётся.
+Полный конверт, включая `provider_operation_id`, сохраняется в `inbox`.
+
+Повтор того же события не меняет состояние. На этом этапе v1 принимает одно
+неизменяемое событие на попытку: другой `event_id` для неё или изменённое содержимое
+прежнего события сохраняются в `payment_rejections` для разбора. Уточнение
+`unknown` будет добавлено отдельным протоколом версий в TBPO-28/32.
+
+Некорректные сообщения и несоответствия также сохраняются в `payment_rejections`:
+причина, исходные байты ключа/значения и позиция Kafka. Запись отказа идемпотентна
+по `(topic, partition, kafka_offset)`. Offset подтверждается только после commit
+изменений либо сохранения отказа. При ошибке БД или подтверждения offset consumer
+переподключается и повторяет доставку с последней подтверждённой позиции.
+
+Проверки обработчика и миграций используют временные базы PostgreSQL; тест
+`test_result_kafka.py` проверяет повторную доставку после перезапуска между
+commit БД и commit offset на настоящем Kafka. Запуск:
+
+```sh
+TEST_DATABASE_URL=postgresql+asyncpg://payment:payment@127.0.0.1:55432/postgres \
+TEST_KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:19092 \
+pytest -q services/payment/tests/test_result*.py services/payment/tests/test_postgres.py
+```
 
 ## Создание платежа
 
