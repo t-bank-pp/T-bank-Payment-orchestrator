@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from aiokafka import AIOKafkaConsumer, TopicPartition
-from contracts import ATTEMPT_EVENTS, decode_attempt_result
+from contracts import ATTEMPT_EVENTS, decode_attempt_result_event
 from pydantic import ValidationError
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
@@ -63,7 +63,7 @@ async def store_record(database: Database, record: Record) -> str:
         await reject(database, record, "INVALID_RESULT")
         return "rejected"
     try:
-        result = decode_attempt_result(record.value)
+        result = decode_attempt_result_event(record.value)
     except ValidationError:
         await reject(database, record, "INVALID_RESULT")
         return "rejected"
