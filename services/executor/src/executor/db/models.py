@@ -2,7 +2,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, LargeBinary, String, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    LargeBinary,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -52,6 +61,25 @@ class InboxEvent(Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class OutboxMessage(Base):
+    __tablename__ = "outbox"
+    __table_args__ = (
+        Index(
+            "ix_executor_outbox_unpublished", "created_at", postgresql_where="published_at IS NULL"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey("executor_attempts.attempt_id", ondelete="RESTRICT"), unique=True
+    )
+    topic: Mapped[str] = mapped_column(String(255))
+    message_key: Mapped[str] = mapped_column(String(36))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RejectedCommand(Base):
